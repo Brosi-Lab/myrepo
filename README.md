@@ -1,3 +1,3 @@
-# myrepoA line I wrote on my local computer
+# myrepoA Trying with Connor
 adding a line
 adding a line
