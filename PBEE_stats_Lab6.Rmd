@@ -1,0 +1,294 @@
+---
+title: "Lab 6: Generalized Linear Mixed-effects Models"
+author: "Your name [must edit]"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    theme: cosmo
+---
+
+# Generalized Linear Mixed-effects Models
+
+We use 'generalized' models to analyze response variables that are not normal/Gaussian. If you're considering using a GLM or GLMM, you probably already have reason to suspect your data isn't normally distributed. Before you try to fitting various distriutions to your data, it's important (critical even) to first consider the type of data you have and how it was collected. The normal distribution is unbounded (no numerical upper and lower limits), symmetric around the mean, unimodal, with a mean and standard error that aren't necessarily equal to one another, and many other good and wholesome things. In what ways does your data violate assumptions of normality (and make Carl Friedrich Gauss 'clutch his pearls')?
+
+Do you have count data (number of animals, number of deaths, number of offspring, number of parasites)? Count data is often, though not always, skewed right (with a mean closer to 0) and cannot be negative. For example, kitten litter size might hover around 5, be occasionally much greater, but less than 0. Are you working with a percentage or proportion? If the mean of your data is close to 0.5 and the standard deviation is very small, then you could consider a normal distribution. However, as values approach 0 or 1 (0-100%) your data would no longer satisfy assumptions of normality and you should be fitting a binomial distribution instead.
+
+## Visualizing data distributions
+
+The simplest way to fit distributions to your data is graphically. I recently started using the fitdisrplus package, which I think its pretty nifty for this task. To give you a sense of what the package can do, we're going to generate data of 3 different distributions and then ask the package to plot them against theoretical distributions.
+
+```{r Load package "fitdistrplus"}
+# install.packages("fitdistrplus")  run this in your console
+library(fitdistrplus)
+```
+
+```{r GAUSSIAN / NORMAL}
+# GAUSSIAN / NORMAL
+# generate random values from normal distribution: n = 200, mean = 4 
+y1 = rnorm(200, 10)
+# plot the data and cumulative distribution
+plotdist(y1, histo = TRUE, demp = TRUE)
+# plot against theoretical normal distribution 
+plotdist(y1, "norm", para=list(mean=mean(y1), sd=sd(y1)))
+```
+
+```{r POISSON}
+# POISSON
+# generate random values from poisson distribution: n = 200, lambda = 10
+y2 = rpois(200, 10)
+# plot the data and cumulative distribution
+plotdist(y2, histo = TRUE, demp = TRUE)
+# plot against theoretical poisson distribution 
+plotdist(y2, "pois", para=list(lambda = mean(y2)))
+```
+
+```{r NEGATIVE BINOMIAL}
+# NEGATIVE BINOMIAL
+# generate random values from negative binomial distribution: 
+# n = 300, size (# successful trials) = 10, probability of success in each trial = 0.5 
+y3 = rnbinom(300, 10, prob = 0.5)
+# plot the data and cumulative distribution
+plotdist(y3, histo = TRUE, demp = TRUE)
+# plot against theoretical negative binomial distribution 
+plotdist(y3, "nbinom", para=list(size=10, prob=0.5))
+```
+
+Let's look at the same data (y3) but instead compare it to a poisson distribution.
+
+```{r Bad fit example}
+# Comparing the negative binomial data to a theoretical poisson
+plotdist(y3, "pois", para=list(lambda = mean(y3)))
+```
+
+# Real data example - bee communities
+
+## Fitting distributions
+
+Let's look an example with more realistic data. In this study, we want to know how management treatment (mgmt) affects bee abundance (abund) in timber plantations.
+
+```{r Import data - community}
+library(tidyverse)
+commdat = read.csv("community.csv")
+as.tibble(commdat)
+```
+
+Abundance is counts of bees in a place. This could have a Poisson distribution but let's check.
+
+```{r Community example - Fitting a Poisson distribution}
+isitgonnabepois <- fitdist(commdat$abund,"pois")
+summary(isitgonnabepois)
+plot(isitgonnabepois)
+```
+Well, that's a horrendous fit! Look at the Emp. and theo distribution plot. You can see the mean bee abundance is about 10 based on the theoretical Poisson distribution plotted. By definition, in a Poisson distribution both the mean and variance are equal (represented by the symbol lambda). As mentioned before, count data can frequently take on a Poisson distribution but clearly that is not the case here. Why? This data is skewed. We have lots of small numbers in our data and few large numbers, so that data is overdispersed relative to a Poisson distribution. This can be common with field ecology count data due to the stochasticity of natural environments e.g. most days sampling in the field researchers observed just 1 or 2 bees. Sometimes, count data can contain a lot of zeros, in which case the data could be zero-inflated. 
+
+Many field ecologists have come to expect zero-inflated data or data skewed towards small numbers depending on what they are measuring. In your specific field, other non-normal distributions might be common and you'll learn to indentify and check for them too.
+
+To deal with data that is overdispersed for Poisson, we could try fitting a negative binomial distribution instead.
+
+```{r Community example - Fitting a negative binomial distribution}
+# plot against theoretical negative binomial distribution 
+fitnb <- fitdist(commdat$abund,"nbinom")
+summary(fitnb)
+plot(fitnb)
+```
+
+Not perfect but much better, especially for noisy ecology data like this. Short of transforming the data, we're going to use this distribution but we could still have overdispersion. It is important when reporting the results of generalized linear models to specify what distribution you fitted the data to. In this study, we reported that we attempted to fit a Poisson but that the data was overdispersed, so we opted for a negative binomial distribution instead.  
+
+After we've fit a distrubution to our data, we can specify the distribution in a our generalized linear model.
+
+## Recap on linear models covered thus far
+
+In the lme4 package, you so far have performed a variety of linear models of increasing complexity. To write a 'generalized' model, just add 'g' at the start of the model (so lm becomes glm) and then specify a 'family'. Study the syntax of the following models. These models aren't appropriate for our analysis, so don't worry about running them (though they should run fine if you try).
+
+```{r Using lme4 for generalized linear models}
+library(lme4)
+
+# (study these model syntax examples, no need to run summaries.)
+
+# What we have covered in the past weeks 
+linear <- lm(abund ~ mgmt, data = commdat)
+linear.mixedeff <- lmer(abund ~ mgmt + (1|state/site.id), data = commdat)
+
+# Now adding 'g' to make them generalized + specifying 'family'
+linear.generalized <- glm(abund ~ mgmt, family = 'poisson', data = commdat)
+linear.mixedeff.generalized <- glmer(abund ~ mgmt + (1|state/site.id), family = 'poisson', data = commdat)
+```
+
+Pretty straightforward, right? 
+
+## Running a Generalized Linear Mixed-effects Model
+
+Today we're going to introduce you to a new package for running linear models. So far, we have taught you 'lme4' because it is (still) widely used and many later packages build on it. However, 'lme4' does have limitations. For example, 'lme4' cannot  deal with zero-inflated or negative binomial data in a straightforward way. Note how we specified 'poisson' errors in the above 'lme4' models, even though we have already said that negative binomial is a better fit. Newer packages are trying to cater to more types of data, whilst reducing computational complexity so as to make running analyses like model selection more efficient. Many of these packages are very new and even experimental. Turns out creating packages to deal with unusual distributions (especially zero-inflated) is very hard and it takes developers a while to iron out all the kinks.
+
+The best package that I've found for analyzing negative binomial data is called 'glmmADMB'. Conveniently, 'glmmADMB' has kept the 'lme4' the syntax so you're already up to speed. With 'glmmADMB', one can specify two types of negative binomial family functions, as well as fit poisson, logistic, gamma, beta and even truncated distributions.
+
+Installing this one is a bit fancy-fancy. We are actually going to summon it directly from Ben Bolker's git repository, like so: 
+
+```{r Install package glmmADMB}
+# install.packages("R2admb") 
+# install.packages("glmmADMB",
+#   repos=c("http://glmmadmb.r-forge.r-project.org/repos",
+#        getOption("repos")), type="source")
+library(glmmADMB)
+```
+
+Now we can party. There are two parameterizations of the negative binomial distributions we can specify, "nbinom1" or "nbinom2". 
+
+The difference between these two is that 'nbinom(2) uses the 'classical' mean/variance parameterization, such that the variance is mu multiplied by (1+mu/k), k>0 (i.e. variance is approx. equal to the mean for mu<<k and proportional the mean squared for mu>>k); nbinom1 uses the parameterization variance=mu*alpha, alpha>1, i.e. the variance is always proportional to the mean.' For more, see Bolker et al 2012 (https://groups.nceas.ucsb.edu/non-linear-modeling/projects/owls/WRITEUP/owls.pdf)
+
+In application, 'nbinom1' has a mean-variance relationship functionally similar to a quasi-Poisson distribution. However, the 'nbinom2' parameterization is straight-up classic negative binomial. I suggest reading Ver Hoef & Boveng 2007 to learn about when to use which.
+
+Ver Hoef, J. M. and Boveng, P. L. (2007), QUASI‐POISSON VS. NEGATIVE BINOMIAL REGRESSION: HOW SHOULD WE MODEL OVERDISPERSED COUNT DATA?. Ecology, 88: 2766-2772. doi:10.1890/07-0043.1
+
+For this exercise, we are going to use 'nbinom2'.
+
+```{r Run GLMM with glmmADMB}
+mod1 <- glmmadmb(abund ~ mgmt+flowerrich+(1|state/site.id), family = "nbinom2", data = commdat)
+summary(mod1)
+```
+
+This output is quite similar to what we have seen but it reports the fixed effects first.
+
+## Multiple comparisons within categorical predictor (with generalized linear hypothesis testing)
+
+In our model, mgmt is a categorical variable. All the treatments in mgmt are compared to the alphabetical first, mgmtclear.debris (Intercept). However, when analyzing catergorical treatments often want to compare multiple treatments to one another. 
+
+## Tukey test
+One way to do this is with a Tukey test using the package 'multcomp'. A Tukey test looks at all the possible pair-wise comparisons.
+
+```{r Tukey test with multcomp}
+library(multcomp)
+
+tuktuk <- glht(mod1, linfct = mcp(mgmt = "Tukey"))
+summary(tuktuk)
+```
+
+## Specific pair-wise comparisons
+With the same package, we can run specific comparisons too. Note that the p-values are slightly smaller when we define the comparisons. Why?
+
+```{r Pair-wise comparisons with multcomp}
+# We specify the pairs to be compared and specify the null hypotheses.
+pekingduck <- glht(mod1, linfct = mcp(mgmt = c("clear.debrisremoved - clear.debris = 0",
+                                                  "thinned - unthinned = 0",
+                                                  "mature - young = 0")))
+summary(pekingduck) 
+```
+
+Here we can see that the difference in bee abundance between clear.debrisremoved and clear.debris is statistically significant, and that clear.debrisremoved has more bees (estimate is positive).
+
+We can plot the 95% confidence intervals for these comparisons.
+
+```{r Plot 95% CI for glht, fig.height=6, fig.width=6}
+plot(pekingduck)
+```
+
+## Plotting our results
+
+Let's plot our data so we can assess the magnitude of the differences. Once again, we're using ggplot. We will use the 'summarize' function in dplyr to obtain means and errors that we can then plot.
+
+```{r Summarize data for plotting}
+library(dplyr)
+
+# Summarize data for plotting by creating a new condensed dataframe
+wonk <- group_by(commdat,mgmt)
+wonk <- summarize(wonk,n.abund=n(),mean.abund=mean(abund),sd.abund=sd(abund))
+```
+
+```{r Barplot (dynamite plot) with error bars that show standard deviation}
+# Barplot with 95% confidence intervals
+ggplot(wonk, aes(x=mgmt, y=mean.abund)) + 
+  geom_bar(width=0.8, position=position_dodge(width=20), stat="identity") +
+  geom_errorbar(aes(ymin=mean.abund-sd.abund, ymax=mean.abund+sd.abund),
+                width=.2, # Width of the error bars
+                position=position_dodge(.9)) +
+                xlab("\nPlantation types") +
+                  ylab("Bee abundance")
+```
+
+Okay, not quite what we want but unsurprising given we know the data has lots of small numbers. Let's plot 95% confidence intervals. Regretably, dplyr won't calculate CIs for you with a simple command. No worries, we'll calculate it manually.
+
+```{r Barplot with 95% confidence intervals}
+
+# calculate 95% CIs and add that to the plotting dataframe. Create new dataframe.
+wonkCIs <- mutate(wonk, se.abund = sd.abund / sqrt(n.abund),
+         lower.ci = qt(1 - (0.05 / 2), n.abund - 1) * se.abund,
+         upper.ci = qt(1 - (0.05 / 2), n.abund - 1) * se.abund)
+
+# Barplot with 95% confidence intervals
+ggplot(wonkCIs, aes(x=mgmt, y=mean.abund)) + 
+  geom_bar(width=0.8, position=position_dodge(width=20), stat="identity") +
+  geom_errorbar(aes(ymin=mean.abund-lower.ci, ymax=mean.abund+upper.ci),
+                width=.2, # Width of the error bars
+                position=position_dodge(.9)) +
+                xlab("\nPlantation types") +
+                ylab("Bee abundance") +
+                ylim(0,40)
+
+```
+
+This plot is better. Small thing though: look at how the different management treatments are sorted alphabetically. Would be nice to have 'young' and 'mature' bars side-by-side. Here's one way to do it.
+
+```{r Reordering treatment variable for barplot }
+# Create a new column in the plotting data with numbers in the order you want the bars plotted
+wonkCIs$plottingorder <- c(1,2,4,5,6,3)
+# Reorder it
+wonkCIssorted <- wonkCIs[order(wonkCIs$plottingorder),]
+
+# Now plot. Similar code as before, now with data = 'wonkCIssorted' and adding 'reorder' to the aes(x)
+ggplot(wonkCIssorted, aes(x=reorder(mgmt, plottingorder), y=mean.abund)) + 
+  geom_bar(width=0.8, position=position_dodge(width=20), stat="identity") +
+  geom_errorbar(aes(ymin=mean.abund-lower.ci, ymax=mean.abund+upper.ci),
+                width=.2, # Width of the error bars
+                position=position_dodge(.9)) +
+                xlab("\nPlantation types") +
+                ylab("Bee abundance") +
+                ylim(0,40)
+
+```
+
+## Watch out for Dynamites
+Some are philosphically opposed to bar plots like this (technically called dynamite plots) for many reasons. Firstly, they conceal the distribution of the actual data points and do not show how many data points there are. Another reason is that the error bars can distort the appearance of means plotted, giving the illusion of greater or lesser height. They also make people assume that the lowest possible value plotted on the y axis is zero. In this case this the y-axis does start from zero but sometimes such plots do not start at zero, and if you miss this then you could midjudge the magnitude of height differences.
+
+Try with points instead of bars. Looks more elegant too.
+
+```{r Plot points with error bars}
+
+ggplot(wonkCIssorted, aes(x=reorder(mgmt, plottingorder), y=mean.abund)) + 
+  geom_point(stat="identity", size = 3) +
+  geom_errorbar(aes(ymin=mean.abund-lower.ci, ymax=mean.abund+upper.ci),
+                width=.2, # Width of the error bars
+                position=position_dodge(.9)) +
+                xlab("\nPlantation types") +
+                ylab("Bee abundance") +
+                ylim(0,40)
+
+```
+
+Here's an informative and honest alternative: boxplots with data points overlayed. We are plotting raw data, so we call 'commdat' instead of the summarized plotting data.
+
+```{r Boxplot with data point overlay}
+
+commdat %>% # *see below
+  
+  # reorder factors, here's a different way with the help of the 'tidyverse' package
+  mutate(mgmt = fct_relevel(mgmt, "clear.debris", "clear.debrisremoved", "young", "mature", "thinned", "unthinned")) %>% 
+  
+  # plotting
+    ggplot(aes(x=mgmt, y=abund)) + 
+    # this hides outliers, plotting raw data instead (but do not abuse!)
+    geom_boxplot(outlier.shape=NA) + 
+    # set color, alpha = level of transparency of the points, add some jitter
+    geom_point(color = "blue", alpha = 0.3, position = position_jitter(w = 0.2, h = 0)) + 
+    # axes
+    xlab("\nPlantation types") +
+    ylab("Bee abundance") +
+    ylim(0,150)
+
+# *the %>% acts like a comma that links clauses. To R, this syntax reads: call commdat, now mutate it, now ggplot it. Note that this doesn't change commdat permanently.
+
+```
